@@ -7,6 +7,7 @@
 #include <hlx/lsnr.h>
 #include <hlx/proxy_h.h>
 #include <hlx/stat_h.h>
+#include <hlx/file_h.h>
 #include <hlx/default_rqst_h.h>
 #include <hlx/url_router.h>
 #include <hlx/api_resp.h>
@@ -19,13 +20,11 @@
 #include <errno.h>
 //#include <google/profiler.h>
 
-
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS 1
 #endif
 #include <inttypes.h>
 
-//#include <google/profiler.h>
 #include <hlx/trace.h>
 #include <hlx/access.h>
 
@@ -201,9 +200,11 @@ int main(void)
         ns_hlx::rqst_h *l_proxy_host_h = new ns_hlx::proxy_h("http://127.0.0.1:12346", "/proxy");
         ns_hlx::rqst_h *l_proxy_bad_host_h = new ns_hlx::proxy_h("http://butts.butts.butts.zzzzzzipers", "/proxy_bad");
         ns_hlx::rqst_h *l_default_h = new default_h();
+        ns_hlx::file_h *l_file_h = new ns_hlx::file_h();
         ns_hlx::rqst_h *l_quit_h = new quitter();
         l_lsnr->add_route("/proxy/*", l_proxy_host_h);
         l_lsnr->add_route("/proxy_bad/*", l_proxy_bad_host_h);
+        l_lsnr->add_route("/files/*", l_file_h);
         l_lsnr->add_route("/quit", l_quit_h);
         l_lsnr->set_default_route(l_default_h);
         g_srvr = new ns_hlx::srvr();
@@ -219,6 +220,8 @@ int main(void)
         //g_srvr->set_rqst_resp_logging(true);
         //g_srvr->set_rqst_resp_logging_color(true);
         //ProfilerStart("tmp.prof");
+        //printf("Starting heap profiler.\n");
+        //HeapProfilerStart("tmp.heap.prof");
         g_srvr->run();
         //sleep(1);
         //while(g_srvr->is_running())
@@ -227,9 +230,12 @@ int main(void)
         //        //g_srvr->display_stats();
         //}
         //ProfilerStop();
+        //printf("Stopping heap profiler.\n");
+        //HeapProfilerStop();
         if(g_srvr) {delete g_srvr; g_srvr = NULL;}
         if(l_hc_stats_h) {delete l_hc_stats_h; l_hc_stats_h = NULL;}
         if(l_proxy_host_h) {delete l_proxy_host_h; l_proxy_host_h = NULL;}
         if(l_proxy_bad_host_h) {delete l_proxy_bad_host_h; l_proxy_bad_host_h = NULL;}
+        if(l_file_h) {delete l_file_h; l_file_h = NULL;}
         if(l_quit_h) {delete l_quit_h; l_quit_h = NULL;}
 }

@@ -32,8 +32,9 @@ import SocketServer
 import gzip
 
 # ------------------------------------------------------------------------------
-# upstream response
+# globals
 # ------------------------------------------------------------------------------
+# upstream response
 G_TEST_RESP_TEMPLATE = {
     'stuff': [
         'junk',
@@ -46,6 +47,7 @@ G_TEST_RESP_TEMPLATE = {
        {'tacos': 85}
     ]
 }
+G_RESPONSE_FILE = ''
 
 # ------------------------------------------------------------------------------
 # Upstream Server
@@ -68,34 +70,37 @@ class UpstreamHTTPServer(SocketServer.ThreadingMixIn,
 # ------------------------------------------------------------------------------
 class ListBuffer(object):
     # ------------------------------------------------------
-    # This little bit of code is meant to act as a buffer
+    # notes from original gist -see header comments:
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # This little bit of code is meant to act as a l_gz_buffer
     # between the optional gzip writer and the actual
     # outgoing socket - letting us properly construct
-    # the chunked output. It also lets us quickly and easily
+    # the chunked l_gz_output. It also lets us quickly and easily
     # determine whether we need to flush gzip in the case
     # where a user has specified
     # 'ALWAYS_SEND_SOME'.
     # 
     # This offers a minimal interface necessary to back a
     # writing gzip stream.
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # ------------------------------------------------------
-    __slots__ = 'buffer',
+    __slots__ = 'l_gz_buffer',
     def __init__(self):
-        self.buffer = []
+        self.l_gz_buffer = []
 
     def __nonzero__(self):
-        return len(self.buffer)
+        return len(self.l_gz_buffer)
 
     def write(self, data):
         if data:
-            self.buffer.append(data)
+            self.l_gz_buffer.append(data)
 
     def flush(self):
         pass
 
     def getvalue(self):
-        data = ''.join(self.buffer)
-        self.buffer = []
+        data = ''.join(self.l_gz_buffer)
+        self.l_gz_buffer = []
         return data
 
 # ------------------------------------------------------------------------------
@@ -104,14 +109,15 @@ class ListBuffer(object):
 def chunk_generator():
     # generate some chunks
     for i in xrange(10):
-        time.sleep(.1)
-        yield "this is chunk: %s\r\n"%i
+        time.sleep(.01)
+        yield "this is i_chunk: %s\r\n"%i
 
 # ------------------------------------------------------------------------------
 # Upstream Server
 # ------------------------------------------------------------------------------
 class UpstreamHTTPHandler(BaseHTTPRequestHandler):
     global G_TEST_RESP_TEMPLATE
+    global G_RESPONSE_FILE
     protocol_version = 'HTTP/1.1'
     
     ALWAYS_SEND_SOME = False
@@ -133,7 +139,6 @@ class UpstreamHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(l_str)
 
-
         # --------------------------------------------------
         # /chunked
         # notes from original gist -see header comments:
@@ -147,8 +152,8 @@ class UpstreamHTTPHandler(BaseHTTPRequestHandler):
         # --------------------------------------------------
         if self.path.startswith('/chunked'):
             
-            ae = self.headers.get('accept-encoding') or ''
-            use_gzip = 'gzip' in ae and self.ALLOW_GZIP
+            l_accept_encoding = self.headers.get('accept-encoding') or ''
+            l_use_gzip = 'gzip' in l_accept_encoding and self.ALLOW_GZIP
     
             # send some headers
             self.send_response(200)
@@ -156,47 +161,62 @@ class UpstreamHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'text/plain')
     
             # use gzip as requested
-            if use_gzip:
+            if l_use_gzip:
                 self.send_header('Content-Encoding', 'gzip')
-                buffer = ListBuffer()
-                output = gzip.GzipFile(mode='wb', fileobj=buffer)
-    
+                l_gz_buffer = ListBuffer()
+                l_gz_output = gzip.GzipFile(mode='wb', fileobj=l_gz_buffer)
+
             self.end_headers()
+
+            # ----------------------------------------------
+            # from file
+            # ----------------------------------------------
+            print 'FILE: %s'%(G_RESPONSE_FILE)
+            if G_RESPONSE_FILE:
+                print 'opening FILE: %s'%(G_RESPONSE_FILE)
+                with open(G_RESPONSE_FILE) as l_f:
+                    for i_line in l_f:
+                        l_tosend = '%X\r\n%s\r\n'%(len(i_line), i_line)
+                        self.wfile.write(l_tosend)
+                # send the chunked trailer
+                self.wfile.write('0\r\n\r\n')
+
+            # ----------------------------------------------
+            # string chunks
+            # ----------------------------------------------
+            else:
+                # get some chunks
+                for i in xrange(10):
+                    time.sleep(.01)
+                    i_chunk = "this is i_chunk: %s\r\n"%i
     
-            def write_chunk():
-                tosend = '%X\r\n%s\r\n'%(len(chunk), chunk)
-                self.wfile.write(tosend)
+                    # we've got to compress the i_chunk
+                    if l_use_gzip:
+                        l_gz_output.write(i_chunk)
+                        # we'll force some l_gz_output from gzip if necessary
+                        if self.ALWAYS_SEND_SOME and not l_gz_buffer:
+                            l_gz_output.flush()
+                        i_chunk = l_gz_buffer.getvalue()
+        
+                        # not forced, and gzip isn't ready to produce
+                        if not i_chunk:
+                            continue
+        
+                    l_tosend = '%X\r\n%s\r\n'%(len(i_chunk), i_chunk)
+                    self.wfile.write(l_tosend)
     
-            # get some chunks
-            for chunk in chunk_generator():
-                if not chunk:
-                    continue
+                # no more chunks!
     
-                # we've got to compress the chunk
-                if use_gzip:
-                    output.write(chunk)
-                    # we'll force some output from gzip if necessary
-                    if self.ALWAYS_SEND_SOME and not buffer:
-                        output.flush()
-                    chunk = buffer.getvalue()
-    
-                    # not forced, and gzip isn't ready to produce
-                    if not chunk:
-                        continue
-    
-                write_chunk()
-    
-            # no more chunks!
-    
-            if use_gzip:
-                # force the ending of the gzip stream
-                output.close()
-                chunk = buffer.getvalue()
-                if chunk:
-                    write_chunk()
-    
-            # send the chunked trailer
-            self.wfile.write('0\r\n\r\n')
+                if l_use_gzip:
+                    # force the ending of the gzip stream
+                    l_gz_output.close()
+                    i_chunk = l_gz_buffer.getvalue()
+                    if i_chunk:
+                        l_tosend = '%X\r\n%s\r\n'%(len(i_chunk), i_chunk)
+                        self.wfile.write(l_tosend)
+        
+                # send the chunked trailer
+                self.wfile.write('0\r\n\r\n')
 
         # --------------------------------------------------
         # default endpoint
@@ -228,7 +248,21 @@ def main(argv):
                             type=int,
                             required=True)
 
+
+    # file
+    arg_parser.add_argument('-f',
+                            '--file',
+                            dest='file',
+                            help='File to send (for response)',
+                            type=str,
+                            required=False)
+
+
     args = arg_parser.parse_args()
+
+    global G_RESPONSE_FILE
+    if args.file:
+        G_RESPONSE_FILE = args.file
 
     try:
         l_server = UpstreamHTTPServer(('', args.port), UpstreamHTTPHandler)
